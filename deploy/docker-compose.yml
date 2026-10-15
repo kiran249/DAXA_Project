@@ -1,0 +1,115 @@
+# DAXA base stack for the L40S GPU host.
+# Only Caddy publishes ports (80/443). Everything else is reachable solely on
+# the internal Docker network, behind HTTPS.
+#
+#   cd /opt/daxa/deploy && docker compose up -d
+#   docker compose --profile gpu-check run --rm gpu-check   # verify GPU in containers
+
+name: daxa
+
+services:
+  caddy:
+    image: caddy:2.8
+    container_name: daxa-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+
+  postgres:
+    image: postgres:16
+    container_name: daxa-postgres
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_DB: ${APP_DB}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      KEYCLOAK_DB: ${KEYCLOAK_DB}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      # Data lives on the 250 GiB persistent block-storage volume.
+      - ${DATA_ROOT}/postgres:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: daxa-keycloak
+    restart: unless-stopped
+    command: ["start"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: https://${AUTH_DOMAIN}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [edge, backend]
+
+  # ---------------------------------------------------------------------------
+  # Application services plug in here. Caddy already routes:
+  #   APP_DOMAIN -> frontend:3000   API_DOMAIN -> backend:8000
+  # Example GPU service (AI models) — note the device reservation:
+  #
+  # ai-models:
+  #   image: <your-inference-image>
+  #   restart: unless-stopped
+  #   volumes:
+  #     - model_cache:/models
+  #     - ${DATA_ROOT}/recordings:/data/recordings
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   networks: [backend]
+  # ---------------------------------------------------------------------------
+
+  gpu-check:
+    image: nvidia/cuda:12.4.1-base-ubuntu22.04
+    profiles: ["gpu-check"]
+    command: ["nvidia-smi"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  edge:
+  backend:
+
+volumes:
+  caddy_data:
+  caddy_config:

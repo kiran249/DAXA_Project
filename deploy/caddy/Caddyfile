@@ -1,0 +1,38 @@
+# Automatic HTTPS: Caddy obtains and renews Let's Encrypt certificates for each
+# site once its DNS A record points at the server. Port 80 only serves ACME
+# challenges and redirects to HTTPS.
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	encode zstd gzip
+}
+
+{$APP_DOMAIN} {
+	import security_headers
+	reverse_proxy frontend:3000
+}
+
+{$API_DOMAIN} {
+	import security_headers
+	request_body {
+		max_size 200MB # audio uploads
+	}
+	reverse_proxy backend:8000
+}
+
+{$AUTH_DOMAIN} {
+	import security_headers
+	# Keycloak admin console is only reachable via SSH tunnel, not publicly.
+	@admin path /admin /admin/*
+	respond @admin 403
+	reverse_proxy keycloak:8080
+}

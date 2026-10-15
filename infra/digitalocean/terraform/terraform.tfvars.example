@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+# Credentials go in the environment instead:
+#   export TF_VAR_do_token=dop_v1_...
+#   export TF_VAR_spaces_access_id=...
+#   export TF_VAR_spaces_secret_key=...
+
+project_name = "daxa"
+environment  = "production"
+region       = "tor1" # must offer gpu-l40sx1-48gb
+
+droplet_size  = "gpu-l40sx1-48gb"
+droplet_image = "gpu-h100x1-base" # verify: doctl compute image list --public | grep -i gpu
+
+admin_username = "daxa"
+ssh_public_keys = {
+  "ops-laptop" = "ssh-ed25519 AAAA... ops@example.com"
+}
+# existing_ssh_key_fingerprints = ["aa:bb:cc:..."]
+
+# Restrict SSH to office / VPN egress IPs.
+ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+data_volume_size_gib = 250
+
+# DNS — set manage_dns = true only if the domain's nameservers are DigitalOcean's.
+manage_dns  = false
+domain      = "daxa.example.com"
+dns_records = ["app", "api", "auth"]
+
+# Off-server PostgreSQL backups
+create_backup_bucket  = true
+backup_bucket_name    = "daxa-pg-backups-prod" # must be globally unique
+backup_spaces_region  = "nyc3"
+backup_retention_days = 35
+backup_schedule       = "*-*-* 02:30:00"
